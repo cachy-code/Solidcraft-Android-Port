@@ -1,5 +1,5 @@
 
-name: Build 32-bit APK from upstream releases
+name: Build 32-bit ARMv7 APK
 
 on:
   schedule:
@@ -7,10 +7,10 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
-  group: upstream-android-release
+  group: upstream-android-build
   cancel-in-progress: false
 
 jobs:
@@ -31,17 +31,7 @@ jobs:
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
           echo "name=$NAME" >> "$GITHUB_OUTPUT"
 
-          gh api "repos/deveshrai/Solidcraft-Android-Port/releases/tags/$TAG" \
-            --jq '.body // ""' > "$RUNNER_TEMP/release-notes.md"
-
-          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-            echo "already_exists=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "already_exists=false" >> "$GITHUB_OUTPUT"
-          fi
-
       - name: Checkout upstream source
-        if: steps.upstream.outputs.already_exists == 'false'
         uses: actions/checkout@v4
         with:
           repository: deveshrai/Solidcraft-Android-Port
@@ -49,24 +39,20 @@ jobs:
           path: source
 
       - name: Set up Java
-        if: steps.upstream.outputs.already_exists == 'false'
         uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: '17'
 
       - name: Set up Android SDK
-        if: steps.upstream.outputs.already_exists == 'false'
         uses: android-actions/setup-android@v3
-        with:
-          packages: platform-tools
-          
+
       - name: Install Android SDK and NDK
-        if: steps.upstream.outputs.already_exists == 'false'
         shell: bash
         run: |
           set +o pipefail
           yes | sdkmanager --licenses
+
           sdkmanager --install \
             "platform-tools" \
             "platforms;android-36" \
@@ -76,63 +62,28 @@ jobs:
           echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/29.0.14206865" >> "$GITHUB_ENV"
 
       - name: Set up Rust
-        if: steps.upstream.outputs.already_exists == 'false'
         uses: dtolnay/rust-toolchain@stable
         with:
           targets: armv7-linux-androideabi
 
       - name: Cache Rust dependencies
-        if: steps.upstream.outputs.already_exists == 'false'
         uses: Swatinem/rust-cache@v2
         with:
           workspaces: source
 
       - name: Install cargo-ndk
-        if: steps.upstream.outputs.already_exists == 'false'
         run: cargo install cargo-ndk --locked
 
       - name: Build 32-bit APK
-        if: steps.upstream.outputs.already_exists == 'false'
         working-directory: source/apps/solidcraft-android/android
         run: |
           chmod +x ./gradlew
           ./gradlew assembleDebug -Psolidcraft.abis=armeabi-v7a
 
-      - name: Find APK
-        if: steps.upstream.outputs.already_exists == 'false'
-        id: apk
-        shell: bash
-        run: |
-          APK=$(find "$GITHUB_WORKSPACE/source/apps/solidcraft-android/android/app/build/outputs/apk/debug" -name '*.apk' -print -quit)
-
-          if [ -z "$APK" ]; then
-            echo "No APK found!"
-            exit 1
-          fi
-
-          echo "path=$APK" >> "$GITHUB_OUTPUT"
-
-      - name: Push upstream tag to fork
-        if: steps.upstream.outputs.already_exists == 'false'
-        working-directory: source
-        env:
-          GH_TOKEN: ${{ github.token }}
-          RELEASE_TAG: ${{ steps.upstream.outputs.tag }}
-        shell: bash
-        run: |
-          git remote add fork "https://github.com/$GITHUB_REPOSITORY.git"
-          git push "https://x-access-token:${GH_TOKEN}@github.com/$GITHUB_REPOSITORY.git" "refs/tags/$RELEASE_TAG"
-
-      - name: Publish release in fork
-        if: steps.upstream.outputs.already_exists == 'false'
-        env:
-          GH_TOKEN: ${{ github.token }}
-          RELEASE_TAG: ${{ steps.upstream.outputs.tag }}
-          RELEASE_NAME: ${{ steps.upstream.outputs.name }}
-          APK_PATH: ${{ steps.apk.outputs.path }}
-        shell: bash
-        run: |
-          gh release create "$RELEASE_TAG" "$APK_PATH" \
-            --repo "$GITHUB_REPOSITORY" \
-            --title "$RELEASE_NAME" \
-            --notes-file "$RUNNER_TEMP/release-notes.md"
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: solidcraft-armv7-${{ steps.upstream.outputs.tag }}
+          path: source/apps/solidcraft-android/android/app/build/outputs/apk/debug/*.apk
+          if-no-files-found: error
+          retention-days: 30
