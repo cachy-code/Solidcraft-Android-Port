@@ -60,11 +60,12 @@ jobs:
         uses: android-actions/setup-android@v3
         with:
           packages: platform-tools
-
+          
       - name: Install Android SDK and NDK
         if: steps.upstream.outputs.already_exists == 'false'
         shell: bash
         run: |
+          set +o pipefail
           yes | sdkmanager --licenses
           sdkmanager --install \
             "platform-tools" \
