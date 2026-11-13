@@ -58,6 +58,8 @@ jobs:
       - name: Set up Android SDK
         if: steps.upstream.outputs.already_exists == 'false'
         uses: android-actions/setup-android@v3
+        with:
+          packages: platform-tools
 
       - name: Install Android SDK and NDK
         if: steps.upstream.outputs.already_exists == 'false'
