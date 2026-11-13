@@ -1,0 +1,146 @@
+
+name: Build 32-bit APK from upstream releases
+
+on:
+  schedule:
+    - cron: "*/15 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: upstream-android-release
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check latest upstream release
+        id: upstream
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          RELEASE=$(gh api repos/deveshrai/Solidcraft-Android-Port/releases/latest)
+
+          TAG=$(jq -r '.tag_name' <<< "$RELEASE")
+          NAME=$(jq -r '.name // .tag_name' <<< "$RELEASE")
+          SHA=$(gh api "repos/deveshrai/Solidcraft-Android-Port/git/ref/tags/$TAG" --jq '.object.sha')
+
+          # Resolve annotated tags to their actual commit.
+          TYPE=$(gh api "repos/deveshrai/Solidcraft-Android-Port/git/ref/tags/$TAG" --jq '.object.type')
+          if [ "$TYPE" = "tag" ]; then
+            SHA=$(gh api "repos/deveshrai/Solidcraft-Android-Port/git/tags/$SHA" --jq '.object.sha')
+          fi
+
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "name=$NAME" >> "$GITHUB_OUTPUT"
+          echo "sha=$SHA" >> "$GITHUB_OUTPUT"
+
+          gh api "repos/deveshrai/Solidcraft-Android-Port/releases/tags/$TAG" \
+            --jq '.body // ""' > "$RUNNER_TEMP/release-notes.md"
+
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "already_exists=true" >> "$GITHUB_OUTPUT"
+            echo "Release $TAG has already been built."
+          else
+            echo "already_exists=false" >> "$GITHUB_OUTPUT"
+            echo "New upstream release found: $NAME ($TAG)"
+          fi
+
+      - name: Check out upstream release source
+        if: steps.upstream.outputs.already_exists == 'false'
+        uses: actions/checkout@v4
+        with:
+          repository: deveshrai/Solidcraft-Android-Port
+          ref: ${{ steps.upstream.outputs.tag }}
+          path: source
+          fetch-depth: 0
+
+      - name: Set up Java
+        if: steps.upstream.outputs.already_exists == 'false'
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Android SDK
+        if: steps.upstream.outputs.already_exists == 'false'
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android SDK and NDK
+        if: steps.upstream.outputs.already_exists == 'false'
+        shell: bash
+        run: |
+          sdkmanager --install \
+            "platform-tools" \
+            "platforms;android-36" \
+            "build-tools;36.0.0" \
+            "ndk;29.0.14206865"
+
+          echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/29.0.14206865" >> "$GITHUB_ENV"
+
+      - name: Set up Rust
+        if: steps.upstream.outputs.already_exists == 'false'
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: armv7-linux-androideabi
+
+      - name: Cache Rust dependencies
+        if: steps.upstream.outputs.already_exists == 'false'
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: source
+
+      - name: Install cargo-ndk
+        if: steps.upstream.outputs.already_exists == 'false'
+        run: cargo install cargo-ndk --locked
+
+      - name: Build 32-bit APK
+        if: steps.upstream.outputs.already_exists == 'false'
+        working-directory: source/apps/solidcraft-android/android
+        run: |
+          chmod +x ./gradlew
+          ./gradlew assembleDebug -Psolidcraft.abis=armeabi-v7a
+
+      - name: Find APK
+        if: steps.upstream.outputs.already_exists == 'false'
+        id: apk
+        working-directory: source
+        shell: bash
+        run: |
+          APK=$(find apps/solidcraft-android/android/app/build/outputs/apk/debug \
+            -name '*.apk' -print -quit)
+
+          if [ -z "$APK" ]; then
+            echo "No APK was produced!"
+            exit 1
+          fi
+
+          echo "path=$APK" >> "$GITHUB_OUTPUT"
+          echo "Found APK: $APK"
+
+      - name: Push upstream tag to fork
+        if: steps.upstream.outputs.already_exists == 'false'
+        working-directory: source
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          gh auth setup-git
+          git remote add fork "https://github.com/$GITHUB_REPOSITORY.git"
+          git push fork "refs/tags/${{ steps.upstream.outputs.tag }}"
+
+      - name: Publish release in fork
+        if: steps.upstream.outputs.already_exists == 'false'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${{ steps.upstream.outputs.tag }}" \
+            "${{ steps.apk.outputs.path }}" \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "${{ steps.upstream.outputs.name }}" \
+            --notes-file "$RUNNER_TEMP/release-notes.md"
