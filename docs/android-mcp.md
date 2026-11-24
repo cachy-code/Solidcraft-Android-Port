@@ -49,7 +49,9 @@ filleted the four vertical edges, then took a screenshot through the server and 
 
 **A bigger test, on a Galaxy Z Fold over Wi-Fi:** a cassette housing in two halves with five M2 screws on
 helical threads, built and checked to fit through the server: 121 operations in 105 s, none failed, with
-the time of every operation ([android-mcp-live-test.md](android-mcp-live-test.md)).
+the time of every operation ([android-mcp-live-test.md](android-mcp-live-test.md)). On 0.41.0a, with
+upstream's modelled threads, the same 121 operations take 42 s on a Galaxy Tab, 45 s on the Fold and
+67 s on a Pixel 9 ([android-0410a-test.md](android-0410a-test.md#4-the-cassette-test-on-a-galaxy-tab)).
 
 ![A cassette housing built over the MCP server on a Galaxy Z Fold](screenshots/android/mcp-cassette-fold.gif)
 
@@ -86,17 +88,16 @@ token, the choice of device or network and the start-up setting are remembered.
 Everything desktop SolidCraft's MCP server offers, because it *is* that server
 ([mcp.md](mcp.md#tools)): run any command (`execute`, `batch`), list and describe commands, inspect
 and measure the design, read body topology, set parameters, undo and redo, open, save and export,
-take screenshots, and read SolidCraft's modelling guides. The port's own commands are there too:
-`gear.create` makes any of the ten gear types, and `solid.thread` with `helical: true` makes an exact
-helical thread ([android-gears.md](android-gears.md), [android-threads.md](android-threads.md)).
+take screenshots, and read SolidCraft's modelling guides. Since 0.41.0a the port adds no commands
+of its own: gears come from upstream's plugins, threads are upstream's `solid.thread`.
 
 The agent works on the design in the active tab, as you would. Its changes are ordinary history
 steps: undo them, edit them or save them as usual.
 
 ## Long operations
 
-Most commands answer in well under a second; a boolean on a gear or a helical thread can take a few
-seconds on a phone or tablet, and a check between two gears a minute or two. Since 0.24.0b:
+Most commands answer in well under a second; a boolean on a gear or a modelled thread can take a
+few seconds on a phone or tablet. Since 0.24.0b:
 
 - **The app stays responsive.** An agent's command computes off the window thread: the view goes on
   drawing, a chip at the bottom says what is computing (`Cylinder · Computing… 88 s`) with a
@@ -116,8 +117,8 @@ on an existing bore through many retries, and on a gear's or thread's curved fac
 hundreds of times slower, or fails. Start a cut a little outside the body (0.5–1 mm past the face it
 enters through), make a bore once through everything after the parts are joined rather than boring
 the same axis twice, and keep joined parts overlapping by more than a sliver. A live example, the
-timings and what changed: [android-mcp-live-test.md](android-mcp-live-test.md#a-worm-gearbox-on-a-galaxy-tab);
-how 0.24.0b made gears and long calls quicker: [android-speed.md](android-speed.md).
+timings and what changed: [android-mcp-live-test.md](android-mcp-live-test.md#a-worm-gearbox-on-a-galaxy-tab)
+(on the truck kernel, before 0.40).
 
 ## Files
 

@@ -90,7 +90,7 @@ fn picked_box(app: &SolveApp, d: &crate::dialogs::Dialog) -> Option<(Vec<Vec<Vec
     let mut lines: Vec<Vec<Vec2>> = Vec::new();
     let mut points: Vec<Vec2> = Vec::new();
     let mut drawn: Vec<usize> = Vec::new();
-    for id in crate::sketch_modify_ui::entity_ids(&app.session, &d.inputs, 0) {
+    for id in crate::sketch_modify_ui::entity_ids(app, &d.inputs, 0) {
         if let Some(i) = sk.curve_index(&id) {
             // An ellipse's axes go with it when OK applies (`sketch.transform`), so they are
             // drawn with it.
@@ -207,7 +207,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui, proj: &Proj) {
     let Some((lines, _, _)) = picked_box(app, d) else { return };
     let Some(frame) = frame_of(app, d) else { return };
     let Some(plane) = app.session.active_sketch.and_then(|id| crate::canvas::profile_plane(app, id)) else { return };
-    let t = crate::theme::Tokens::get();
+    let t = solidcraft_theme::Tokens::get();
     let painter = ui.painter().clone();
     let stroke = Stroke::new(1.5, t.accent);
     // The picks where OK would leave them.

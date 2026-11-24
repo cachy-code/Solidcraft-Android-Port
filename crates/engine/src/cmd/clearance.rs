@@ -34,7 +34,7 @@ pub static COMMANDS: &[CommandSpec] = &[CommandSpec::new("inspect.clearance", "C
     "bodies?: [names] (default: every solid body, in world placement, but those in `against`; mesh bodies are not measured); against?: [names] (only pairs with one body in `bodies` and the other here); \
      min_volume?: mm³ (default 0.01: smaller overlaps count as contact); clearance?: mm (default 0: report pairs closer than this); \
      nearest?: n (each body of `bodies` gets its n nearest others); skip_within?: \"occurrence\" (pairs of bodies of one occurrence) | \
-     \"component\" (pairs of bodies inside one placed component, its subcomponents included) | null; tolerance?: mm (default 1e-6: a gap \
+     \"component\" (pairs of bodies inside one placed component, its subcomponents included) | null; envelopes?: bool (default false: component envelopes, solid.bounding_solid with `component`, are left out unless named; true: each is checked instead of the bodies inside it, and a body named inside one means it; an envelope is never paired with a body inside it); tolerance?: mm (default 1e-6: a gap \
      below it is contact, 0) → overlaps: [{a, b, volume_mm3, area_mm2, bbox, center}]; near: [{a, b, distance_mm, from, to, overlap_mm3?: \
      a contact's shared volume below min_volume, exact?: false when measured on the meshes}], nearest by body (the same for pairs that overlap: 0); \
      nearest: {body: [{body, distance_mm}]}; unchecked: [{a, b, reason}] (pairs whose overlap could not be worked out; each mesh body, STL/3MF/OBJ import, is not measured and is listed as {a: name, b: null, reason: \"mesh body: not checked\"}, also when named in `bodies` or `against`; the result's `bodies` counts the solid bodies only); pairs_checked; \
@@ -96,16 +96,20 @@ fn clearance(s: &mut Session, p: &Value) -> Result<Value> {
         },
     };
 
+    let use_envelopes = super::envelopes::use_envelopes(p, cmd)?;
     let st = s.world_state()?;
+    let envelopes = super::envelopes::Envelopes::of(s, &st);
     let (mesh_bodies, solid): (Vec<&solidcraft_doc::ModelBody>, Vec<&solidcraft_doc::ModelBody>) = st.bodies.iter().partition(|b| b.body.is_mesh());
     // Mesh bodies are not measured. A mesh body named in `bodies` or `against` is left out of the
-    // pairs and listed as unchecked, rather than refused as "no solid body".
+    // pairs and listed as unchecked, rather than refused as "no solid body". With `envelopes`, a
+    // body inside a component envelope is checked as that envelope.
     let named = |key: &str| -> Result<Vec<usize>> {
         let names = string_list(cmd, p, key)?;
         let mut out = Vec::new();
         for n in &names {
-            let Some(i) = solid.iter().position(|b| &b.name == n) else {
-                if mesh_bodies.iter().any(|b| &b.name == n) {
+            let n = if use_envelopes { envelopes.standing_in(n) } else { n.as_str() };
+            let Some(i) = solid.iter().position(|b| b.name == n) else {
+                if mesh_bodies.iter().any(|b| b.name == n) {
                     continue;
                 }
                 return Err(bad(cmd, format!("no solid body `{n}`")));
@@ -117,9 +121,13 @@ fn clearance(s: &mut Session, p: &Value) -> Result<Value> {
         Ok(out)
     };
     let against = if p.get("against").is_none_or(Value::is_null) { None } else { Some(named("against")?) };
-    // Without `bodies`: every body (every body not in `against`, when it is given).
+    // Without `bodies`: every body (every body not in `against`, when it is given), the
+    // envelopes left out, or with `envelopes` standing in for the bodies inside them.
     let subjects = if p.get("bodies").is_none_or(Value::is_null) {
-        (0..solid.len()).filter(|i| against.as_ref().is_none_or(|a| !a.contains(i))).collect()
+        (0..solid.len())
+            .filter(|i| against.as_ref().is_none_or(|a| !a.contains(i)))
+            .filter(|&i| solid.get(i).is_some_and(|b| envelopes.by_default(&b.name, use_envelopes)))
+            .collect()
     } else {
         named("bodies")?
     };
@@ -155,6 +163,12 @@ fn clearance(s: &mut Session, p: &Value) -> Result<Value> {
             Some(_) => (flag(&in_subjects, i) && flag(&in_against, j)) || (flag(&in_subjects, j) && flag(&in_against, i)),
         };
         if !paired {
+            return false;
+        }
+        // An envelope around the other body is no finding.
+        if let (Some(x), Some(y)) = (solid.get(i), solid.get(j))
+            && envelopes.encloses(&x.name, &y.name)
+        {
             return false;
         }
         let (a, b) = (path_of(i), path_of(j));
@@ -359,16 +373,6 @@ fn measure_pair(
     tolerance: f64,
 ) -> PairResult {
     let mut out = PairResult::default();
-    // SolidCraft (Android port): meshes too close for their chords to tell apart (a screw in a
-    // bore 0.2 mm wider, against a slack of a millimetre) are made finer before the pair is
-    // intersected, and measured on those when they part: a finer mesh takes a second, the
-    // boolean against a long thread minutes.
-    let finer = finer_meshes(ka, a, kb, b);
-    let shapes = finer.as_ref().map(|(ma, ta, mb, tb)| (DistanceShape::new(ka, ma, *ta), DistanceShape::new(kb, mb, *tb)));
-    let (a, b) = match &shapes {
-        Some((x, y)) => (x, y),
-        None => (a, b),
-    };
     let slack = 2.0 * (a.chord() + b.chord());
     let mesh = a.mesh_closest(b, gap + slack);
     let holds = |outer: &solidcraft_doc::ModelBody, inner: &solidcraft_doc::ModelBody| {
@@ -384,8 +388,13 @@ fn measure_pair(
     };
     let touching = mesh.is_some_and(|m| m.distance <= slack);
     if touching || holds(ba, bb) || holds(bb, ba) {
-        // A pair whose shared part can't be worked out is reported, not passed as clear.
-        match solidcraft_kernel::boolean(ka, kb, solidcraft_kernel::BoolOp::Intersect) {
+        // A pair whose shared part can't be worked out is reported, not passed as clear. SMLib's
+        // check of the shared part runs here: a part it refuses is reported, not measured.
+        match solidcraft_kernel::validating(solidcraft_kernel::Validation::EachStep, || {
+            solidcraft_kernel::boolean(ka, kb, solidcraft_kernel::BoolOp::Intersect)
+        })
+        .0
+        {
             Err(e) => {
                 out.unchecked = Some(e.to_string());
                 return out;
@@ -423,35 +432,6 @@ fn measure_pair(
         Err(e) => out.unchecked = Some(e.to_string()),
     }
     out
-}
-
-/// How many times finer than their display meshes two bodies are meshed again, in turn, when
-/// those are too close to tell apart (SolidCraft, Android port).
-const FINER: [f64; 2] = [8.0, 64.0];
-
-/// Meshes of `ka` and `kb` (and their chords) fine enough to show them apart, when their
-/// display meshes `a` and `b` come within their slack of each other; `None` when those are
-/// apart already or no finer mesh parts them.
-fn finer_meshes(
-    ka: &solidcraft_kernel::Body,
-    a: &DistanceShape,
-    kb: &solidcraft_kernel::Body,
-    b: &DistanceShape,
-) -> Option<(solidcraft_geom::Mesh, f64, solidcraft_geom::Mesh, f64)> {
-    if !(a.chord() > 0.0 && b.chord() > 0.0) || ka.is_mesh() || kb.is_mesh() {
-        return None;
-    }
-    let slack = 2.0 * (a.chord() + b.chord());
-    a.mesh_closest(b, slack)?;
-    for k in FINER {
-        let (ta, tb) = ((a.chord() / k).max(ka.size() * 1e-6), (b.chord() / k).max(kb.size() * 1e-6));
-        let (ma, mb) = (ka.mesh(&solidcraft_kernel::MeshTolerance::chord(ta)).ok()?, kb.mesh(&solidcraft_kernel::MeshTolerance::chord(tb)).ok()?);
-        let apart = DistanceShape::new(ka, &ma, ta).mesh_closest(&DistanceShape::new(kb, &mb, tb), 2.0 * (ta + tb)).is_none();
-        if apart {
-            return Some((ma, ta, mb, tb));
-        }
-    }
-    None
 }
 
 /// The box where two bodies may share volume: where their boxes meet, grown by a margin.

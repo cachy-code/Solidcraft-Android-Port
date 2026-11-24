@@ -1,17 +1,18 @@
-# Using SolidCraft on Android
+# Using SolidCraft on Android and Googlebook OS
 
 A guide to the Android app with touch, a mouse and keyboard, and files. The app is the full
 desktop SolidCraft; this covers what is different on a phone or tablet. Building and how the port
 works: [android.md](android.md).
 
 Screenshots are from a Galaxy Z Fold (inner screen, landscape, unless noted) running
-SolidCraft 0.21.0a; the Threads and Render screenshots are from 0.22.0a, the Gears ones from a
-Galaxy Tab running 0.22.0 with the gears.
+SolidCraft 0.21.0a; the Render screenshots are from 0.22.0a. Everything here applies to a
+Googlebook too (Googlebook OS is Android-based): there the app runs in a desktop window, with a
+trackpad, mouse and keyboard as on a computer.
 
 - [Touch](#touch)
 - [Modelling by touch](#modelling-by-touch)
 - [Threads](#threads)
-- [Gears](#gears)
+- [Plugins (gears)](#plugins-gears)
 - [Rendering](#rendering)
 - [Claude Code (MCP server)](#claude-code-mcp-server)
 - [Mouse and keyboard](#mouse-and-keyboard)
@@ -34,10 +35,14 @@ Galaxy Tab running 0.22.0 with the gears.
 | Drag a menu or dialog up or down | Scroll it: a ribbon menu taller than the screen (Model › Create runs past the bottom on a foldable) or a tall dialog. A mouse drags a menu row onto the ribbon to pin it instead |
 | Home button by the axis triad | Return to the home view |
 
-Once two fingers are down the touch stays a pan or pinch until every finger lifts, so lifting
-one finger first does not start an orbit. While a sketch is being edited or a sketch tool is on,
-a one-finger drag draws or drags geometry as the mouse does, not orbit; the view bar at the bottom
-(orbit, pan, zoom buttons) still moves the view then.
+Orbit, pan and pinch are upstream's touchscreen navigation (Preferences › Navigation), on by
+default on Android since 0.45.0a; turned off, a one-finger drag box-selects as a mouse does. Once
+two fingers are down the touch stays a pan or pinch until every finger lifts, so lifting one
+finger first does not start an orbit. A finger that lands on a point, curve or dimension of the
+sketch being edited, or on a dialog's arrow, drags it as the mouse does instead of orbiting, and
+with a dialog open a finger on empty space still turns the view. While a sketch tool is on, a
+one-finger drag draws; the view bar at the bottom (orbit, pan, zoom buttons) still moves the view
+then.
 
 | One finger: orbit | Pinch: zoom | Two fingers: pan |
 |---|---|---|
@@ -104,52 +109,26 @@ Commands not on the ribbon are a search away: tap **Search commands** (top right
 
 **Create ▾ › Thread**, then tap the cylindrical face (a shaft, or the inside of a hole). The size
 that fits is filled in (M20 on a 20 mm shaft). Off **Modeled** it is a cosmetic thread, drawn
-but not cut; with **Modeled** on, **Geometry** chooses how the groove is made:
+but not cut; with **Modeled** on it is upstream's exact helical thread: ISO metric, trapezoidal,
+Acme, buttress or pipe forms, any `M<diameter>x<pitch>` designation, several starts, either hand,
+a runout and a chamfered tip. To change a thread later, double-tap it in the **History** bar.
 
-- **Faceted**: the original method, a groove of flat triangles; the body's curved faces become
-  facets too.
-- **Helical B-rep** (this port): a few exact, smooth helical faces; the rest of the body stays
-  exact, so fillets, a second thread and STEP export all keep working. It starts and ends half a
-  pitch in from the face's ends. An M20 × 20 mm took under two seconds on the Fold.
+The port's own helical B-rep threads (a custom pitch on any diameter, print clearance, a start
+angle) were retired in 0.41.0a for upstream's modelled threads; designs that have them open with
+upstream's thread on the same face, the old values kept in the design's metadata
+([android-whats-new.md](android-whats-new.md#0410a)).
 
-![A helical B-rep M20 thread](screenshots/android/19-helical-thread.jpg)
+## Plugins (gears)
 
-**Type: Custom** threads any shaft or hole as it is, whatever its diameter: type a **Pitch** (and
-optionally a **Thread depth** or **Thread angle**; **Thread direction** makes it left-handed). For parts that screw
-together, **Clearance** moves the flanks and root into the material, typically 0.1–0.2 mm for a
-3D print. Tap OK rather than pressing Enter in a field: Enter applies the dialog straight away.
-To change a thread later, double-tap it in the **History** bar.
-
-| Custom thread, clearance being set | The result |
-|---|---|
-| ![Editing a custom thread's clearance](screenshots/android/20-custom-thread-clearance.jpg) | ![A custom thread with clearance](screenshots/android/21-custom-thread-result.jpg) |
-
-Everything about threads (each field, the groove's shape, the readouts, refusals and the
-`solid.thread` script parameters): [android-threads.md](android-threads.md).
-
-A design with a helical thread is saved in a newer file format than upstream SolidCraft's
-release reads; desktop SolidCraft asks to be updated instead of opening it. Export STEP to take
-such a part to other software.
-
-## Gears
-
-**Create ▾ › Gear** (or search *gear*) makes an involute gear as its own component: spur,
-helical, herringbone, internal, rack, bevel, miter, worm, worm wheel or crossed helical (this
-port). Pick a **Type**, a **Module** and **Teeth**; the view previews every change, and the
-readouts show the diameters, the mate's centre distance and any undercut. **Bore and hub** adds a
-bore, a DIN 6885 keyway and a hub. **OK** inserts it at the origin, axis up Z.
-
-| The Gear dialog | Bore, hub and keyway |
-|---|---|
-| ![The Gear dialog and its readouts](screenshots/android/gears-tab-02-dialog.jpg) | ![A helical gear's bore, hub and keyway previewed](screenshots/android/gears-tab-03-bore-hub-keyway.jpg) |
-
-To change a gear, double-tap it in the browser, or long-press it there (or hold a finger on it in the view and lift) and choose **Edit Gear**; OK
-rebuilds it in place, in one undo step. The values are saved with the design.
-
-![The ten gear types](screenshots/android/gears-tab-08-all-types.jpg)
-
-Everything about gears (each type, making pairs that mesh, the readouts and warnings, the
-`gear.create` parameters and how it is built): [android-gears.md](android-gears.md).
+Upstream SolidCraft runs plugins since 0.41.0 (an experimental first version), and the port
+builds them in. The first is [SolidCraft Gears](https://github.com/bherbruck/solidcraft-gears),
+an involute spur gear generator: download its `.zip` from its releases page, then **Settings ›
+Plugins › Install plugin…** and pick the file in Android's file picker. Installed plugins run from
+the **Plugins** menu (**Plugins › Plugins…**), each with a dialog built from its parameters. This
+works from 0.41.0b; 0.41.0a can't install plugins ([known issues](android-known-issues.md)). Tested
+on a Galaxy Z Fold ([the test](android-0410a-test.md#5-plugins-on-a-galaxy-z-fold)). An agent over
+MCP can't install a plugin, but it can run a package unpacked in its own folder. The port's own Gear command was
+retired in 0.41.0a; gears made with it stay in their designs as ordinary sketches and features.
 
 ## Rendering
 
@@ -188,6 +167,12 @@ S for search, Esc).
 Tap a field (a dialog's value, command search, a rename) and Android's on-screen keyboard comes
 up; type, and tap outside or press Back to put it away. It covers the lower part of the screen,
 so a dialog low on the screen may sit under it; a hardware keyboard avoids that.
+
+A field the app focuses for you (a new parameter's name, a rectangle's dimension boxes as you
+place its first corner) takes a hardware keyboard's typing at once, but the on-screen keyboard
+waits until you tap the field (since 0.42.0a, [#6](https://github.com/deveshrai/Solidcraft-Android-Port/issues/6)).
+Once it is up it stays up as Tab moves to the next box; if you hid it with its ⌄ key, tap the
+field again to bring it back.
 
 ![Typing on the on-screen keyboard](screenshots/android/12-on-screen-keyboard.jpg)
 
@@ -235,13 +220,6 @@ unfolding keeps the app and the design.
 | ![The app on a cover screen](screenshots/android/16-cover-screen.jpg) | ![The Create menu on the cover screen](screenshots/android/17-cover-create-menu.jpg) |
 
 ## Limits
-
-- **Faceted threads** (Geometry: Faceted) cut a groove of flat triangles (within 0.5% of the
-  pitch), as on the desktop, and the threaded body's curved faces become facets too; on the Fold
-  an M20 × 20 mm took under a second. Choose **Helical B-rep** ([Threads](#threads)) to keep the
-  body exact.
-
-  ![A modelled thread close up](screenshots/android/18-modelled-thread.jpg)
 
 - Autosave recovery is not available on Android yet: save your work.
 - Ribbon labels are shortened at high screen densities ("Cham…" for Chamfer); the tooltip and

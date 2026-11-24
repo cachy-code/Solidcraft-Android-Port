@@ -4,8 +4,8 @@ What is wrong or missing in the current port release, and what is planned for th
 entry says how to work around it today. Fixed entries move to [Fixed](#fixed) with the release that
 fixed them.
 
-Current: **port 0.40.0-rc.3b** (upstream's 0.40.0-rc.3 pre-release); the stable one is **0.30.1a**. Next:
-**0.40.0-rc.3c**, or the next upstream release's **a**, if upstream releases
+Current: **port 0.48.1a** (upstream's 0.48.1). Next:
+**0.48.1b**, or the next upstream release's **a**, if upstream releases
 first. See also [android-vs-upstream.md](android-vs-upstream.md) for what upstream has that the port
 doesn't, and the reverse.
 
@@ -20,14 +20,17 @@ doesn't, and the reverse.
 
 | Issue | Seen on | Work-around today | Plan |
 |---|---|---|---|
+| **0.48.1a hasn't been tried on OpenGL ES or on a device yet.** It was tested on the Android emulator, which draws with Vulkan. Upstream 0.48 draws edges a new way that needs a feature OpenGL ES lacks, so on OpenGL ES the view keeps the older way; no phone falling back to OpenGL ES has shown 0.48.1a yet. | Android emulator, 0.48.1a | If the view or its edges look wrong, **Report a bug** in the app | Test on the Galaxy Tab, Z Fold and Pixel 9, and on OpenGL ES with a debug build |
+| **A plugin runs only from a folder named after its id.** Gears 0.10.0's zip unpacks to `gears-0.10.0`; an agent that runs it from there (`plugin.inspect`) is refused until it is renamed `gears`. Installing through Settings › Plugins isn't affected. | Android emulator, 0.48.1a | Rename the folder to the plugin's id | Upstream's rule: suggest the plugin ship its folder under its id |
 | **On Adreno GPUs bodies are built on the CPU.** Upstream 0.40's GPU tessellation shader crashes Qualcomm's compiler, so the port skips it there. Showing a large design can take longer than it would on the GPU. | Galaxy Z Fold (Adreno 840), 0.40.0-rc.2a | None needed | Report the crash upstream with the shader; turn the GPU back on for Adreno once a driver or shader change avoids it |
+| **Googlebook screens differ.** The app runs on Googlebooks exactly as on other Android devices, since the Android underneath is the same; it was fine on an HP and a Dell XPS Googlebook (0.41.0a). Other models have other resolutions and scaling, which haven't been tried. | HP and Dell XPS Googlebooks, 0.41.0a | If the layout looks wrong, resize the app's window | Report screenshots from other models: [issues](https://github.com/deveshrai/Solidcraft-Android-Port/issues) |
+| **On a phone held upright the isometric view doesn't fit a wide part.** View › Isometric (and an agent's `view.isometric`) leaves a part wider than tall running off both sides of the view; the fit seems to go by the view's height only. | Pixel 9 in portrait, 0.41.0a | Turn the phone sideways, or zoom out with a pinch | Fit by width too, in the port or upstream (check upstream first) |
+| **On a phone held upright the crosshair button is half off the screen**, at the view bar's left edge. It still works. | Pixel 9 in portrait, 0.41.0a | Tap its visible half, or turn the phone sideways | Keep the view bar on screen on narrow views |
 | **A launch that dies in the GPU's driver moves the app to OpenGL ES for good.** The startup guard from 0.30.1a can't tell a crash while compiling a shader from graphics that don't start, so after the Adreno crash above the next launch used OpenGL ES (MSAA 1x) and kept it. | Galaxy Z Fold, the first 0.40.0-rc.2a build | Stop the app in its first quarter-second once (it then goes back to Vulkan), or reinstall | Keep OpenGL ES only when Vulkan failed before the window drew |
-| **Going back to 0.30.1a needs an uninstall.** The 0.40 pre-releases' version codes are higher, and Android refuses a downgrade; uninstalling deletes the app's settings and crash reports. Designs saved by 0.40.0-rc.3a or b (format 52) don't open in 0.30.1a or 0.40.0-rc.2a. | Any | Save designs to a device folder first, and keep 0.30.1a copies of anything important | By design for a pre-release |
-| **The port's helical threads don't stop at a shoulder.** Since rc.3, upstream's modelled threads run down to a shoulder (a bolt's head) and are trimmed at its face, so a nut seats; the port's helical thread (Form: Custom, or Helical B-rep) still stops clear of it. | Mac command-line app, 0.40.0-rc.3a | Leave a short plain neck under the head, or use upstream's modelled thread for a standard size | Trim the port's groove at a shoulder the way upstream's is |
+| **Going back to an earlier release needs an uninstall.** Android refuses a lower version code; uninstalling deletes the app's settings and crash reports. Designs saved by 0.41.0a (format 55) don't open in earlier port releases. | Any | Save designs to a device folder first, and keep 0.30.1a copies of anything important | By design for a pre-release |
 | **A tap on a dialog's OK can also select in the view.** With the crosshair button on, tapping **OK** in the Extrude window (opened by Press Pull on a screw head) closed it and then selected the face of the body behind it, as if the tap went through. Enter in the value field instead did not. | Galaxy Tab, 0.28.0a | Confirm with Enter, or tap empty space after | Find whether the closing tap reaches the view, and stop it there |
 | **Preferences' page list once ignored taps.** Right after the first start on OpenGL ES, three taps (finger and mouse) on page names didn't change the page; after a minute and from then on, every tap did. | Pixel Tablet emulator, 0.30.1a | Tap again | Reproduce it; if it is the first seconds after start, find what the window is still busy with |
 | **The first crash report's title is cut short** ("Closed …") when it carries a count (×2): the row has one more button (Save a copy) than upstream's. | Pixel Tablet emulator, 0.30.1a | The message below the title says it in full | Wrap the buttons under the title on narrow rows |
-| **The helical thread is hard to find.** Thread opens as upstream's does. Since 0.40.0-rc.2a **Custom** is the last entry of the **Form** list, and an ISO metric thread's Clearance and Start angle appear only after ticking **Modeled** and then **Helical B-rep**. | Galaxy Z Fold, 0.23.0a; still so in 0.40.0-rc.2a | Form › **Custom**, or **Modeled** › **Helical B-rep** ([android-threads.md](android-threads.md)) | Decide whether the port opens Thread with Modeled ticked |
 | **A file saved to a device folder can lose its extension.** Save As writes the name typed in Android's picker; type *gear* and the file is `gear`, not `gear.sc`. The app itself names the tab and its copy correctly and opens the file again, but file managers and other apps don't know what it is. | Pixel 9 and Galaxy Z Fold, 0.23.0a and b | Type the extension: *gear.sc*, *part.stl* | Ask the picker for the name with its extension kept, or rename the saved document through the provider |
 | **Reopen designs doesn't reopen them.** Upstream 0.24.1's Settings › General › *Reopen the designs that were open* records them when the app quits; Android never quits an app that way (it stops it in the background), so nothing is recorded. | Galaxy Tab, 0.25.1a | **File › Open Recent** | Record the open designs when the app goes to the background |
 | **Samsung's window handle covers the new-tab button.** On Samsung devices the handle at the top centre sits over the tab strip; a tap there can open Samsung's window menu instead of **+**. | Galaxy Z Fold | **Ctrl+N** or **File › New Design** | Keep the tab strip's buttons out of the handle's area on Samsung devices |
@@ -35,8 +38,8 @@ doesn't, and the reverse.
 
 ## Planned, larger
 
-The kernel rows below (bores, drafted joins, gear checks, the groove's ends) were found on truck. 0.40.0-rc.2a
-runs on solidcore, and they haven't been checked there yet.
+The kernel rows below (bores, drafted joins) were found on truck. Since 0.40 the port runs on
+solidcore, and they haven't been checked there yet.
 
 | Issue | Work-around today | Plan |
 |---|---|---|
@@ -45,12 +48,7 @@ runs on solidcore, and they haven't been checked there yet.
 | **No "Open with".** Opening a `.solidcraft`, STEP or STL from a file manager or a mail doesn't offer SolidCraft. | **File › Open** inside the app | Register the file types and take the shared file as an Open |
 | **A cylinder exactly on an existing bore, or a cut starting exactly on a gear's end face, is slow or fails.** A second Ø8 bore on the axis of an existing one fails ("no result"); upstream's kernel retries such contacts many times. (Joins that touch a gear's flat end face are quick since 0.24.0b.) | Start cuts outside the body, bore once after joining ([android-mcp.md](android-mcp.md#long-operations)) | Upstream's kernel: a cheaper path for coincident faces |
 | **A join into a drafted face can fail first, or stall.** A feature that joins into a boss extruded with a taper (a cone), while sitting flush on another face, can need the kernel's retry ("Boolean retry: tool displacement…", seconds) or run for minutes: a 4 mm step clipping a 2° boss took 95 s on a Mac, 0.2 s with the step moved clear. Upstream builds measure the same. Details: [android-devterm-test.md](android-devterm-test.md#3-joins-that-fail-first-or-stall). | Build in separate bodies (side view cut by plan view, bosses on their own) and combine last, a piece at a time, flat pieces first: a2nr's fixture 17 s → 4 s on the tablet ([how](android-devterm-test.md#5-built-as-separate-bodies-instead)) | Upstream's kernel: join into a cone without a retry; give up a slow first attempt sooner |
-| **Interference and clearance between two gears take a minute or more.** Worm against worm wheel: 77 s on a Mac; the exact intersection of their helical flanks is meshed finely. | Check the gear pair once, at the end | Measure an interference from meshes first |
-| **Checks between large bodies are slow.** Interference and clearance between the two halves of the [cassette test](android-mcp-live-test.md) take about 38 s and 35 s on a Galaxy Z Fold (about 1 s each before its tape-path blocks were added). | Check the pairs that matter (`bodies`, `against`) | Find what makes those pairs slow |
-| **A sketch can't attach to the end of a helical thread's groove.** The two small flat faces closing the groove's ends share one name, so a sketch or offset plane on them is refused ("its history can't tell it apart"). Every other face of a threaded body attaches. | Use a fixed plane there (`fixed: true`) | Name the groove's faces apart (found by the design corpus, `the_groove_ends_of_a_helical_thread_take_an_attached_sketch`) |
-| **A modelled screw through a modelled nut always overlaps it.** Two threads start at unrelated angles (fixed in 0.27.1a: **Start angle**), and a helical thread stops just short of the ends of its face, so a nut keeps a thin unthreaded ring at each end that the screw's teeth pass through. Interference and clearance can't measure that overlap in time (two long helical bodies). Details: [android-thread-mating.md](android-thread-mating.md). | Leave the screw–nut pair out of the checks (`bodies`, `against`) | Thread run-out: a groove that leaves through the end of its face; then phase a thread to its mate |
 | **A thread's face can't name its body.** `solid.thread` picks the face by a point; with a screw already in its tapped hole the point is on both, and the wrong one is threaded ("something else of the body meets the thread"). | Thread the part before putting it in place | A `body` parameter, as other commands have |
-| **Helical threads against helical threads aren't intersected.** Interference and clearance list such pairs as not checked. | Check a thread fit on meshes ([how](android-mcp-live-test.md#how-the-fit-was-checked)) | Upstream's kernel |
 | **MCP: nothing on the device says Claude Code is waiting.** With SolidCraft in the background, an agent's call waits 15 s and then tells the agent to ask you to bring SolidCraft back; nothing on the phone itself says so. | Keep SolidCraft on screen next to Termux: split screen or a pop-up window ([android-mcp.md](android-mcp.md#keep-solidcraft-on-screen)) | A notification while a call waits, tapping it brings SolidCraft back |
 | **The phone layout is cramped.** It works in portrait and landscape, but the ribbon and dialogs are tight. | A tablet, or a foldable's inner screen | Larger touch targets and a compact ribbon on narrow screens |
 
@@ -78,14 +76,20 @@ reported or left to upstream, not patched in the port, so merges stay clean.
 
 ## By design
 
+- **An agent can't install a plugin.** Over MCP, `plugin.install` refuses the plugins folder, which is
+  outside the folders an agent may use. Upstream's rule on every platform: Install plugin… on
+  Preferences › Plugins stays with the person at the device.
+
 - **The first open after an update rebuilds the design.** A design keeps its computed model only for
   the build that computed it, so the first time a newer SolidCraft opens it, every feature is
-  computed again (the worm gearbox from [android-speed.md](android-speed.md): 2 minutes on a Galaxy
+  computed again (the worm gearbox from [android-speed.md](https://github.com/deveshrai/Solidcraft-Android-Port/blob/v0.40.0-rc.3b-android/docs/android-speed.md): 2 minutes on a Galaxy
   Tab); saved again, it opens at once (0.4 s). Upstream does the same on every platform.
-- **Upstream's releases don't open designs the port saved.** The port saves one file format past
-  upstream's (38 against 37) for the helical thread fields, so upstream asks to be updated rather
-  than silently rebuilding helical threads as faceted ones. Export STEP to share
-  ([android-vs-upstream.md](android-vs-upstream.md#design-files-and-compatibility)).
+- **Upstream's releases don't open designs saved by port releases up to 0.40.0-rc.3b** (they read
+  the port's helical-thread format changes as a newer build's). Open them in 0.41.0a and save:
+  their helical threads become upstream's modelled threads, the old values kept in the design's
+  metadata, and the design opens in upstream too
+  ([android-vs-upstream.md](android-vs-upstream.md#design-files-and-compatibility)). Designs
+  0.41.0a saves are upstream's own format.
 - **Split Body nudges its plane** (by micrometres) when the exact split fails, and later cuts across that
   seam can fail. Upstream's kernel; build the two sides as separate solids instead.
 - **The MCP server runs the agent's calls only while SolidCraft is on screen.** Android pauses an
@@ -101,13 +105,19 @@ reported or left to upstream, not patched in the port, so merges stay clean.
 
 | Issue | Fixed in |
 |---|---|
+| The app closed when a chamfer was previewed (a cone's or a cylinder's edge picked), or now and then elsewhere after using it a while: Rust's std on Android takes a system thread-local key for each of the app's ~150 thread-locals and Android gives a process about 128, shared with the graphics driver, so std aborted ("out of TLS keys"). Adreno phones ran out first | 0.45.0b: the app's thread-locals share one system key (`apps/solidcraft-android/src/tls_keys.rs`). On the Galaxy Z Fold the same taps that crashed 0.45.0a every time (cone, Chamfer, base edge) previewed and applied, and so did a cylinder's top edge, through three folds and unfolds |
+| With upstream's touch navigation, a finger on sketch geometry orbited instead of dragging it, and with a dialog open a finger couldn't turn the view | 0.45.0a, the release that adopted it: a finger on what the view drags is the view's, and touch navigation stays on with a dialog open. Tested on a Galaxy Tab |
+| The on-screen keyboard came up whenever a window or tool focused a field by itself (Add parameter, a rectangle's dimension boxes), covering the dialog or the sketch: a rectangle's second corner landed on the keyboard ([#6](https://github.com/deveshrai/Solidcraft-Android-Port/issues/6)) | 0.42.0a: the keyboard comes up when you tap a field; a hardware keyboard still types into the focused field at once. Tested on a Galaxy Z Fold |
+| Plugins couldn't be installed: Preferences › Plugins said they were for the desktop app, because upstream keeps plugins under `$XDG_DATA_HOME` or `$HOME`, which Android doesn't have | 0.41.0b: the app's own folder; SolidCraft Gears installs and runs on a Galaxy Z Fold ([the test](android-0410a-test.md#5-plugins-on-a-galaxy-z-fold)) |
+| Checks between large bodies were slow: interference and clearance between the cassette test's two halves took about 38 s and 35 s on a Galaxy Z Fold | 0.41.0a: about 0.5 s each, the whole checks stage 9 s on the Fold ([android-0410a-test.md](android-0410a-test.md#on-a-galaxy-z-fold)) |
+| The port's own gears and helical threads, and their open issues (slow gear-against-gear checks, a sketch on a helical groove's end, threads not stopping at a shoulder, the hard-to-find Helical B-rep option) | Retired in 0.41.0a for upstream's plugins (SolidCraft Gears) and modelled threads |
 | In a Samsung DeX window the window's title bar covered the app's own top bar: File, Settings, the tabs and Report a bug couldn't be reached (full screen was fine) | 0.40.0-rc.3b ([android-0400rc3a-test.md](android-0400rc3a-test.md#4-0400-rc3b-settings-in-a-dex-window)) |
 | Every launch died 0.2 s in on a Galaxy Z Fold (Adreno 840): upstream 0.40's GPU tessellation shader crashed Qualcomm's compiler | 0.40.0-rc.2a, before release: bodies on the CPU on Adreno ([android-0400rc2a-test.md](android-0400rc2a-test.md#2-a-crash-at-every-launch-on-adreno)) |
 | A phone whose graphics couldn't start (a Galaxy A04, [#4](https://github.com/deveshrai/Solidcraft-Android-Port/issues/4)) was aborted at every launch, with no message | 0.30.1a: leaves cleanly, the next launch starts on OpenGL ES, `startup-error.txt` says why ([android-0301a-test.md](android-0301a-test.md#1-a-launch-that-cant-start-its-graphics)) |
 | On OpenGL ES the 3D view was empty: upstream 0.30.1's viewport shader doesn't compile there | 0.30.1a, in the port ([why](android-0301a-test.md#2-the-empty-3d-view-on-opengl-es)) |
 | Crash reports were kept but never shown, couldn't leave the device, and Report… drafted the issue on upstream's tracker | 0.30.1a: announced, **Save a copy**, the port's tracker |
 | The title bar showed upstream's version (v0.25.1), not the port's | 0.27.1a: *v0.27.1a* |
-| A helical thread of more than about 85 turns (an M10 longer than about 128 mm) hung or failed ("volume −651"), and measuring a long threaded body gave a wrong volume | 0.27.1a: a 220 mm M10 thread in 0.8 s on a Mac, 1.2 s on a Galaxy Tab ([android-thread-mating.md](android-thread-mating.md#5-the-test-run)) |
+| A helical thread of more than about 85 turns (an M10 longer than about 128 mm) hung or failed ("volume −651"), and measuring a long threaded body gave a wrong volume | 0.27.1a: a 220 mm M10 thread in 0.8 s on a Mac, 1.2 s on a Galaxy Tab ([android-thread-mating.md](https://github.com/deveshrai/Solidcraft-Android-Port/blob/v0.40.0-rc.3b-android/docs/android-thread-mating.md#5-the-test-run)) |
 | Clearance and interference between bodies a hair apart (a screw in its bearing bore) ran into minutes, and clearance could report 0 mm | 0.27.1a: such pairs are meshed finer first (551 s → 4 s) |
 | A slow agent command (a boolean on a gear) froze the app until Android closed it as not responding; the MCP client saw calls time out and sent them again | 0.24.0b: agent commands compute off the window thread, long calls answer "still running" and wait through `pending`, sessions don't block each other |
 | Booleans on gears and helical threads were 2–3× slower than needed (each B-spline surface point summed every control point) | 0.24.0b |

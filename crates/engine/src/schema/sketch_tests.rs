@@ -3,7 +3,7 @@ use serde_json::{Value, json};
 use super::{
     CoincidentParams, CoincidentResult, CollinearParams, ConcentricParams, ConstraintResult, EqualParams, EqualResult, FixParams, FixResult,
     HorizontalVerticalParams, MidpointParams, Operand, ParallelParams, PerpendicularParams, PointOperand, SketchKey, SymmetryParams, SymmetryResult,
-    TangentParams,
+    TangentParams, TangentResult,
 };
 use crate::Session;
 use crate::schema::tests::{assert_keys, assert_strict_keeps_todays_errors, conforms};
@@ -241,6 +241,10 @@ fn the_types_read_each_key_as_the_handlers_do() {
     assert_eq!(p.a, Some(PointOperand::Midpoint("l1".into())));
     let msg = |v: Value| whole_message(parse::<CoincidentParams>(v).map(|_| ()).unwrap_err());
     assert_eq!(msg(json!({"a": {"midpoint": 3}, "b": "p1"})), "`midpoint` must be a curve id");
+    assert_eq!(msg(json!({"a": {"midpoint": {"vertex": [0, 0, 0]}}, "b": "p1"})), "`midpoint` must be a curve id");
+    let edge = json!({"edge": [1, 2, 3], "body": "Body1"});
+    let p: CoincidentParams = parse(json!({"a": "p1", "b": {"midpoint": edge}})).unwrap();
+    assert_eq!(p.b, Some(PointOperand::ModelMidpoint(edge)));
     assert_eq!(msg(json!({"a": "p1", "b": 3})), "`b` must be a point or curve");
     assert_eq!(msg(json!({"a": 3, "b": "p1"})), "`a` must be a point reference");
     // The handler reads `b` before `a`.
@@ -342,9 +346,16 @@ fn replies_match_the_output_schemas_and_real_calls_get_no_warnings() {
     let r = assert_clean::<CoincidentResult>(&mut s, "sketch.constraint.coincident", json!({"a": "c3", "b": "c4"}));
     assert!(r["constraints"].as_array().is_some_and(|c| c.len() == 2) && r.get("constraint").is_some(), "{r}");
 
-    // Tangent, parallel, perpendicular, collinear.
+    // Tangent: two curves, and a line's end point and a circle (#12092), which adds two
+    // constraints.
     let mut s = new();
-    assert_clean::<ConstraintResult>(&mut s, "sketch.constraint.tangent", json!({"a": "l1", "b": "c1"}));
+    let r = assert_clean::<TangentResult>(&mut s, "sketch.constraint.tangent", json!({"a": "l1", "b": "c1"}));
+    assert!(r.get("constraints").is_none(), "{r}");
+    let r = assert_clean::<TangentResult>(&mut s, "sketch.constraint.tangent", json!({"a": "l3.end", "b": "c2"}));
+    assert!(r["constraints"].as_array().is_some_and(|c| c.len() == 2) && r.get("constraint").is_some(), "{r}");
+
+    // Parallel, perpendicular, collinear.
+    let mut s = new();
     assert_clean::<ConstraintResult>(&mut s, "sketch.constraint.parallel", json!({"a": "l2", "b": "l3"}));
     assert_clean::<ConstraintResult>(&mut s, "sketch.constraint.parallel", json!({"a": "l4", "b": "x"}));
     assert_clean::<ConstraintResult>(&mut s, "sketch.constraint.perpendicular", json!({"a": "l5", "b": "l6"}));

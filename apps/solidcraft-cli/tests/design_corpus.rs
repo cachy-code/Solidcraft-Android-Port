@@ -24,8 +24,9 @@ fn open(path: &Path) -> Session {
 }
 
 /// Every corpus design opens, is upgraded to the current format, evaluates, and saves and reads
-/// back the same. A feature may fail only by asking for a reference it lost to be picked again
-/// (a name saved before format 14 finds nothing today).
+/// back the same. A feature may fail only by asking for a reference it lost to be picked again,
+/// or a sketch by naming the projections it lost (a name saved before format 14 finds nothing
+/// today).
 #[test]
 fn old_designs_open_upgrade_and_evaluate() {
     let mut problems = Vec::new();
@@ -33,7 +34,8 @@ fn old_designs_open_upgrade_and_evaluate() {
         let name = p.file_stem().unwrap_or_default().to_string_lossy().to_string();
         let mut s = open(&p);
         for r in &s.model.results {
-            if let Some(e) = r.error.as_deref().filter(|e| solidcraft_engine::doc::reselect_parts(e).is_none()) {
+            let lost = |e: &str| solidcraft_engine::doc::reselect_parts(e).is_some() || solidcraft_engine::doc::lost_projection_parts(e).is_some();
+            if let Some(e) = r.error.as_deref().filter(|e| !lost(e)) {
                 problems.push(format!("{name}: feature {}: {e}", r.id));
             }
         }
@@ -42,14 +44,57 @@ fn old_designs_open_upgrade_and_evaluate() {
         if got["body_count"].as_u64().unwrap_or(0) == 0 {
             problems.push(format!("{name}: no bodies"));
         }
-        // Saved again, it reads back the same.
-        let again = solidcraft_engine::doc::Document::from_json(&s.doc.to_json()).unwrap();
-        assert_eq!(again, *s.doc, "{name}: round trip");
+        // Saved again, it reads back the same: as plain JSON when it holds no binary data (which only
+        // a container keeps), and as a container. Saved as JSON, opened and saved again, it is the
+        // same bytes, so a design kept in Git changes only where the design changed (#626).
+        if s.doc.binary_data().is_empty() {
+            let saved = solidcraft_engine::io::write_design(&s.doc).unwrap();
+            let again = solidcraft_engine::io::read_design(&saved).unwrap();
+            assert_eq!(again, *s.doc, "{name}: round trip");
+            assert!(solidcraft_engine::io::write_design(&again).unwrap() == saved, "{name}: saved again, the JSON is the same bytes");
+        }
         let package = solidcraft_engine::io::write_design_container(&s.doc).unwrap();
         let packaged = solidcraft_engine::io::read_design(&package).unwrap();
         assert_eq!(packaged, *s.doc, "{name}: container round trip after migration");
     }
     assert!(problems.is_empty(), "{}", problems.join("\n"));
+}
+
+/// Android port: designs earlier port releases saved with helical B-rep threads (pending format
+/// changes the port has since retired) open as upstream's: every helical thread is a modelled
+/// thread, and its own values (pitch, clearance, start angle…) are kept in the design's metadata.
+#[test]
+fn port_designs_open_with_their_helical_threads_as_modelled_threads() {
+    let mut seen = 0;
+    for p in corpus().into_iter().filter(|p| p.file_name().is_some_and(|n| n.to_string_lossy().starts_with("port-"))) {
+        let saved: Value = serde_json::from_str(&std::fs::read_to_string(&p).unwrap()).unwrap();
+        let helical: Vec<u64> = saved["features"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter(|f| f["type"] == "thread" && (f["helical"] == true || f.get("pitch").is_some()))
+            .filter_map(|f| f["id"].as_u64())
+            .collect();
+        if helical.is_empty() {
+            continue;
+        }
+        seen += 1;
+        let s = open(&p);
+        let name = p.display();
+        let doc: Value = serde_json::from_str(&s.doc.to_json()).unwrap();
+        // Upstream's own pending changes may be listed; the port's retired ones are not.
+        let pending = doc["format_pending"].as_array().cloned().unwrap_or_default();
+        assert!(!pending.iter().any(|v| v.as_str().is_some_and(|v| v.starts_with("helical-thread"))), "{name}: {pending:?}");
+        for id in &helical {
+            let f = doc["features"].as_array().unwrap().iter().find(|f| f["id"] == *id).unwrap_or_else(|| panic!("{name}: thread {id}"));
+            assert_eq!(f["modeled"], true, "{name}: {f}");
+            assert!(f.get("helical").is_none() && f.get("pitch").is_none(), "{name}: {f}");
+        }
+        let kept = doc["metadata"]["io.github.deveshrai.solidcraft-android"]["retired_helical_threads"].as_array().cloned().unwrap_or_default();
+        let kept_ids: Vec<u64> = kept.iter().filter_map(|k| k["id"].as_u64()).collect();
+        assert_eq!(kept_ids, helical, "{name}: every helical thread's values are kept");
+    }
+    assert!(seen >= 4, "port designs with helical threads in the corpus: {seen}");
 }
 
 /// Names saved before format 14 were worked out from geometry, pieces of a split face numbered by
@@ -106,8 +151,9 @@ fn body_names_saved_before_exact_history_open_marked_and_evaluate() {
 type Planes = &'static [([f64; 3], f64)];
 const NO_ATTACHMENT_YET: [(&str, &str, Option<Planes>, u32); 6] = [
     ("issue-616-lid-ribs", "Lid", None, 628),
-    // Android port (no upstream issue: 0): a helical thread's groove ends are both named as made
-    // from the threaded face, so neither can be told apart from the other.
+    // Android port (no upstream issue: 0): a thread's groove ends are both named as made from the
+    // threaded face, so neither can be told apart from the other (the port's helical threads, and
+    // since 0.41.0a upstream's modelled threads they open as).
     ("port-0240b-gear-helical-thread", "Bolt", Some(&[([1.0, 0.0, 0.0], 30.0), ([-0.3826834323629895, 0.9238795325121567, 0.0], -11.480503)]), 0),
     ("port-0271a-long-thread-start-angle", "Lead screw", Some(&[([0.0, -1.0, 0.0], 0.0), ([-0.9238795325102824, 0.3826834323675143, 0.0], 0.0)]), 0),
     // Android port (no upstream issue: 0): faces cut by one extrude of a sketch with many profiles
@@ -194,7 +240,7 @@ fn flat_face_attachments() -> Vec<(String, String, usize, Option<(u32, bool)>, O
                 Ok(created) => {
                     let id = created["sketch"].as_u64().unwrap_or(0);
                     match s.placed_document().sketch_face_attachment(id, &s.model) {
-                        FaceAttachmentStatus::Healthy { .. } | FaceAttachmentStatus::Sheet { .. } => {}
+                        FaceAttachmentStatus::Healthy { .. } => {}
                         other => problem = Some(format!("sketch attachment {other:?}")),
                     }
                     s.execute("sketch.finish", &json!({})).unwrap();
@@ -249,7 +295,7 @@ fn faces_of_a_lid_with_joined_ribs_take_an_attached_sketch() {
 }
 
 #[test]
-#[ignore = "fails until the Android port names a helical thread's two groove ends apart"]
+#[ignore = "fails until a thread's two groove ends are named apart"]
 fn the_groove_ends_of_a_helical_thread_take_an_attached_sketch() {
     known_faces_attach(0);
 }

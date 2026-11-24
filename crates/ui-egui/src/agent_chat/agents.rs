@@ -32,7 +32,7 @@ impl Mode {
         Mode::ALL.into_iter().find(|m| m.id() == s)
     }
     pub fn label(self) -> &'static str {
-        crate::i18n::tr(match self {
+        solidcraft_ui_text::tr(match self {
             Mode::Ask => "ui.ai_mode_ask",
             Mode::Edits => "ui.ai_mode_edits",
             Mode::All => "ui.ai_mode_all",
@@ -94,6 +94,15 @@ impl Protocol {
     }
 }
 
+/// Whether `base_url` is an OpenCode Go endpoint: model requests to all of them
+/// carry `x-opencode-session` (the `zen/go` gateway and the per-model
+/// `inference/go/...` endpoints alike). The model list and connection test are
+/// plain GETs and send none.
+pub(super) fn is_opencode_go(base_url: &str) -> bool {
+    let u = base_url.trim().to_ascii_lowercase();
+    u.starts_with("https://opencode.ai/") && u.contains("/go")
+}
+
 /// An agent the user added.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
@@ -118,6 +127,8 @@ pub struct AgentConfig {
     /// API: the reasoning effort to send as `reasoning_effort`; empty sends nothing and the
     /// provider's own default applies (trimmed and length-capped by [`reasoning_effort`]).
     pub reasoning_effort: String,
+    /// OpenAI-compatible API: use Responses instead of Chat Completions.
+    pub openai_responses: bool,
 }
 
 impl Default for AgentConfig {
@@ -134,6 +145,7 @@ impl Default for AgentConfig {
             allow_insecure_http: false,
             request_timeout_s: DEFAULT_REQUEST_TIMEOUT_S,
             reasoning_effort: String::new(),
+            openai_responses: false,
         }
     }
 }
@@ -186,6 +198,8 @@ pub struct Entry {
     pub request_timeout_s: u64,
     /// API: the reasoning effort to send, empty for none (trimmed, in length).
     pub reasoning_effort: String,
+    /// OpenAI-compatible API: use Responses instead of Chat Completions.
+    pub openai_responses: bool,
     /// Found installed, but its program didn't start when asked its version: why (#9034).
     pub problem: Option<String>,
     /// Found installed: the command that installs it again.
@@ -208,6 +222,7 @@ impl Entry {
             allow_insecure_http: c.kind == Kind::Api && c.allow_insecure_http,
             request_timeout_s: c.request_timeout_s.clamp(MIN_REQUEST_TIMEOUT_S, MAX_REQUEST_TIMEOUT_S),
             reasoning_effort: reasoning_effort(&c.reasoning_effort),
+            openai_responses: c.kind == Kind::Api && c.openai_responses && !is_opencode_go(&c.base_url),
             problem: None,
             install: "",
         }
@@ -217,7 +232,7 @@ impl Entry {
         match self.kind {
             Kind::Api | Kind::Anthropic => format!("{} · {}", self.model, self.base_url),
             Kind::Acp => match (&self.problem, &self.version) {
-                (Some(p), _) => crate::i18n::format("ui.agent_chat_cannot_start", &[("error", p)]),
+                (Some(p), _) => solidcraft_ui_text::format("ui.agent_chat_cannot_start", &[("error", p)]),
                 (None, Some(v)) => v.clone(),
                 (None, None) => super::panel::short_command(&self.argv.join(" ")),
             },
@@ -228,7 +243,7 @@ impl Entry {
     pub fn problem_hint(&self) -> Option<String> {
         let problem = self.problem.as_deref()?;
         let program = self.argv.first().map(String::as_str).unwrap_or_default();
-        Some(crate::i18n::format(
+        Some(solidcraft_ui_text::format(
             "ui.agent_chat_reinstall",
             &[("agent", &self.name), ("program", program), ("error", problem), ("install", self.install)],
         ))
@@ -254,6 +269,7 @@ pub fn entries(app: &crate::SolveApp) -> Vec<Entry> {
             allow_insecure_http: false,
             request_timeout_s: DEFAULT_REQUEST_TIMEOUT_S,
             reasoning_effort: String::new(),
+            openai_responses: false,
             problem: f.problem.clone(),
             install: f.install,
         }));
@@ -279,6 +295,18 @@ pub fn current(app: &crate::SolveApp) -> Option<Entry> {
 /// The permission mode for an agent: its own, else the global one.
 pub fn mode_for(p: &crate::prefs::Prefs, id: &str) -> Mode {
     p.agent_permissions.get(id).copied().unwrap_or(p.ai_permissions)
+}
+
+/// The permission mode that holds for an agent: the organization's while its policy sets
+/// `ai_permissions` (an agent's own mode doesn't apply then), else [`mode_for`].
+pub fn mode_in_force(app: &crate::SolveApp, id: &str) -> Mode {
+    if app.policy.locks("ai_permissions") { app.preferences.ai_permissions } else { mode_for(&app.preferences, id) }
+}
+
+/// Whether an "always allow" answer lets `agent` use `tool` without asking. None does while the
+/// organization's policy sets `ai_permissions`: the answers are kept for when the policy goes.
+pub fn always_allowed_in_force(app: &crate::SolveApp, agent: &str, tool: &str) -> bool {
+    !app.policy.locks("ai_permissions") && always_allowed(&app.preferences, agent, tool)
 }
 
 /// Whether `tool` is always allowed for `agent`.
@@ -312,11 +340,14 @@ pub const OPENAI_PRESETS: &[ApiPreset] = &[
     ApiPreset { name: "OpenClaw", base_url: "http://localhost:18789/v1" },
     ApiPreset { name: "OpenAI", base_url: "https://api.openai.com/v1" },
     ApiPreset { name: "Mistral AI", base_url: "https://api.mistral.ai/v1" },
+    ApiPreset { name: "Google Gemini", base_url: "https://generativelanguage.googleapis.com/v1beta/openai" },
     ApiPreset { name: "Mammouth AI", base_url: "https://api.mammouth.ai/v1" },
     ApiPreset { name: "OpenCode Go", base_url: "https://opencode.ai/zen/go/v1" },
     ApiPreset { name: "DeepSeek", base_url: "https://api.deepseek.com" },
     ApiPreset { name: "Qwen", base_url: "https://dashscope-intl.aliyuncs.com/compatible-mode/v1" },
     ApiPreset { name: "Cheaper Inference", base_url: "https://api.cheaperinference.com/v1" },
+    // UnoRouter serves OpenAI-compatible chat completions and GET /v1/models (#17068).
+    ApiPreset { name: "UnoRouter", base_url: "https://api.unorouter.com/v1" },
     ApiPreset { name: "OpenRouter", base_url: "https://openrouter.ai/api/v1" },
 ];
 
@@ -381,7 +412,7 @@ pub fn normalize_url(url: &str) -> Result<String, String> {
     let u = url.trim().trim_end_matches('/').to_string();
     let lower = u.to_ascii_lowercase();
     if !(lower.starts_with("http://") || lower.starts_with("https://")) || u.len() < 10 || u.contains(char::is_whitespace) {
-        return Err(crate::i18n::tr("ui.ai_bad_url").to_string());
+        return Err(solidcraft_ui_text::tr("ui.ai_bad_url").to_string());
     }
     Ok(u)
 }
@@ -505,7 +536,17 @@ mod tests {
         assert!(presets(Protocol::OpenAi).iter().all(|p| !p.name.is_empty() && p.base_url.starts_with("http")));
         assert!(presets(Protocol::OpenAi).iter().any(|p| p.name == "Mammouth AI" && key_safe_for(p.base_url)));
         assert!(presets(Protocol::OpenAi).iter().any(|p| p.name == "Mistral AI" && p.base_url == "https://api.mistral.ai/v1"));
+        // #11816: Google's OpenAI-compatible endpoint, with the key sent only over HTTPS.
+        assert!(presets(Protocol::OpenAi).iter().any(|p| p.name == "Google Gemini"
+            && p.base_url == "https://generativelanguage.googleapis.com/v1beta/openai"
+            && key_safe_for(p.base_url)));
         assert!(presets(Protocol::OpenAi).iter().any(|p| p.name == "Cheaper Inference" && key_safe_for(p.base_url)));
+        assert!(
+            presets(Protocol::OpenAi)
+                .iter()
+                .any(|p| p.name == "UnoRouter" && p.base_url == "https://api.unorouter.com/v1" && key_safe_for(p.base_url))
+        );
+        assert!(!presets(Protocol::Anthropic).iter().any(|p| p.name == "UnoRouter"), "this preset uses OpenAI-compatible chat completions");
         assert!(presets(Protocol::Anthropic).iter().any(|p| p.base_url == "https://api.anthropic.com/v1"));
         for name in ["DeepSeek", "Qwen"] {
             assert!(presets(Protocol::OpenAi).iter().any(|p| p.name == name), "OpenAI-compatible preset for {name}");

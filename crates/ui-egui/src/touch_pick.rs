@@ -8,8 +8,8 @@
 use egui::{Event, Painter, Pos2, Rect, Sense, Stroke, TouchPhase, pos2, vec2};
 
 use crate::SolveApp;
-use crate::navigation_bar::{Edge, Kind};
 use crate::ui_kit;
+use crate::ui_kit::{NavigationEdge as Edge, NavigationKind as Kind};
 
 /// How far (points) above the finger the crosshair sits: a fingertip covers about this much.
 pub(crate) const RAISE: f32 = 60.0;
@@ -68,6 +68,24 @@ pub(crate) fn track(app: &mut SolveApp, ctx: &egui::Context, rect: Rect, orbit_p
     Some(aim)
 }
 
+/// Whether a finger just put down at `at` is the view's rather than touch navigation's: on a
+/// dialog's drag arrow, a handle, a dimension or a constraint glyph, or on the geometry of the
+/// sketch being edited, which a finger drags as the mouse does. Checked only as a finger lands.
+pub(crate) fn view_takes(app: &SolveApp, ctx: &egui::Context, proj: &crate::viewport::Proj, at: Option<Pos2>) -> bool {
+    use crate::viewport::Hit;
+    let landed = ctx.input(|i| i.events.iter().any(|e| matches!(e, Event::Touch { phase: TouchPhase::Start, .. })));
+    let Some(p) = at.filter(|_| landed) else { return false };
+    let own = |hit: &Hit| {
+        matches!(hit, Hit::SketchPoint { sketch, .. } | Hit::SketchMidpoint { sketch, .. } | Hit::SketchCurve { sketch, .. }
+            if Some(*sketch) == app.session.active_sketch)
+    };
+    crate::canvas::arrow_at_touch(ctx, p)
+        || crate::canvas::owns_pointer(app, proj, p)
+        || crate::dim_view::hit(p).is_some()
+        || crate::sketch_tools::glyph_at(p).is_some()
+        || (app.session.active_sketch.is_some() && crate::viewport::pick(app, proj, p).first().is_some_and(own))
+}
+
 /// The crosshair for a finger at `at`: above it, kept in the view.
 fn crosshair(at: Pos2, rect: Rect) -> Pos2 {
     pos2(at.x, (at.y - RAISE).max(rect.top() + 1.0))
@@ -87,7 +105,7 @@ pub(crate) fn released(app: &SolveApp) -> Option<Pos2> {
 /// line down to the finger.
 pub(crate) fn paint(app: &SolveApp, painter: &Painter) {
     let Some((aim, at)) = app.viewport.touch_pick.aim else { return };
-    let t = crate::theme::Tokens::view();
+    let t = solidcraft_theme::Tokens::view();
     let (ink, halo) = (t.accent, t.icons.marker_halo);
     let (ring, gap, arm) = (16.0, 5.0, 26.0);
     for (width, colour) in [(4.0, halo), (2.0, ink)] {
@@ -127,7 +145,7 @@ pub(crate) fn button_rect(bar: Rect, content: Rect) -> Rect {
 /// The view bar's crosshair button, at `rect` (see [`button_rect`]): on and off by a finger only.
 pub(crate) fn button(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect, edge: Edge) {
     note_press(app, ui.ctx());
-    let t = crate::theme::Tokens::get();
+    let t = solidcraft_theme::Tokens::get();
     let size = app.preferences.navigation_bar.size;
     ui_kit::navigation_surface(ui, rect, size, false);
     let inner = rect.shrink(ui_kit::NAV_BORDER);

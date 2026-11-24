@@ -183,7 +183,7 @@ struct Painted {
 
 fn painted(h: &Harness, c: egui::Pos2) -> Painted {
     use egui::epaint::{ColorMode, Shape};
-    let core = crate::theme::Tokens::get().icons.highlight;
+    let core = solidcraft_theme::Tokens::get().icons.highlight;
     let mut p = Painted { dots: Vec::new(), lines: Vec::new(), tips: Vec::new(), circles: 0 };
     for clipped in &h.shapes {
         crate::test_support::each_shape(&clipped.shape, &mut |s| match s {
@@ -288,7 +288,7 @@ fn editing_a_hole_drags_it_to_a_new_place() {
 fn snaps_and_moves_are_off_by_default_and_picks_behave_as_before() {
     let mut h = block_as_installed();
     assert!(
-        !h.app.preferences.hole_snaps && !h.app.preferences.hole_moves && !h.app.preferences.hole_several,
+        !h.app.preferences.hole_snaps && !h.app.preferences.hole_moves && !h.app.preferences.hole_several && !h.app.preferences.hole_group,
         "a new installation places holes as it always did"
     );
     h.step(&json!({"start": "solid.hole"})).unwrap();
@@ -533,6 +533,59 @@ fn editing_a_hole_replaces_its_face_instead_of_adding_one() {
     let (again, position) = last_hole(&h);
     assert_eq!(again, hole, "the same feature");
     assert!(position.dist(on_top) < 1e-3, "OK uses the new face: {position:?}");
+
+    // Rebuilding the inputs after a placement change must keep the editor's one-place rule.
+    h.step(&json!({"call": "ui.editFeature", "params": {"feature": hole}})).unwrap();
+    for (current, next) in [("Single", "Multiple"), ("Multiple", "Single")] {
+        h.step(&json!({"widget": current, "near": "Placement"})).unwrap();
+        h.step(&json!({"widget": next})).unwrap();
+    }
+    for point in [Vec3::new(30.0, 15.0, 10.0), on_top] {
+        h.step(&json!({"call": "ui.dialogInput", "params": {"index": 0}})).unwrap();
+        let at = screen(&mut h, point);
+        h.step(&json!({"click": at})).unwrap();
+    }
+    assert_eq!(h.app.dialog.as_ref().unwrap().inputs[0].items.len(), 1, "changing placement must not allow '2 selected' while editing");
+    assert!(matches!(places(&h).as_slice(), [p] if p.dist(on_top) < 1e-3), "{:?}", places(&h));
+    h.step(&json!({"key": "Enter"})).unwrap();
+    assert!(h.app.dialog.is_none(), "{:?}", h.app.dialog.as_ref().map(|d| &d.error));
+    let (again, position) = last_hole(&h);
+    assert_eq!(again, hole, "changing placement still edits the same feature");
+    assert!(position.dist(on_top) < 1e-3, "OK uses the last picked face after changing placement: {position:?}");
+}
+
+/// #17358: a hole of the root that drills only the Block, placed by script at points exactly on
+/// the round side of the Lid's Rod (r 5, axis along x at y 20, z 17, 2 mm over the Block). Edit
+/// Hole opens with its place on the Rod, and OK leaves the hole there: it doesn't move onto the
+/// Block's top and drill the Block.
+#[test]
+fn editing_a_hole_at_a_point_on_a_round_face_of_a_body_it_does_not_cut_keeps_it_there() {
+    for deg in [3.37f64, 7.5, 10.37] {
+        let p = Vec3::new(20.0, 20.0 + 5.0 * deg.to_radians().sin(), 17.0 + 5.0 * deg.to_radians().cos());
+        let mut h = Harness::new();
+        h.app.set_origin_shown(false);
+        h.app.run("solid.box", json!({"length": 40, "width": 40, "height": 10, "corner": [0, 0, 0], "body_name": "Block"})).unwrap();
+        h.app.run("component.create", json!({"name": "Lid"})).unwrap();
+        h.app
+            .run("solid.cylinder", json!({"radius": 5, "height": 40, "base": [0, 20, 17], "axis": "X", "operation": "new", "body_name": "Rod"}))
+            .unwrap();
+        h.app.run("component.activate", json!({"component": "root"})).unwrap();
+        let hole = json!({"position": [p.x, p.y, p.z], "direction": [0, 0, -1], "diameter": 1, "depth": 1.5, "participants": ["Block"], "name": "H"});
+        let hole = h.app.run("solid.hole", hole).unwrap()["feature"].as_u64().unwrap();
+        h.settle();
+        h.step(&json!({"call": "ui.editFeature", "params": {"feature": hole}})).unwrap();
+        h.frames(3);
+        let seeded = &h.app.dialog.as_ref().unwrap().inputs[0].items;
+        assert!(matches!(seeded.as_slice(), [Sel::Face { body, point, .. }] if body == "Rod" && point.dist(p) < 1e-9), "{deg}°: {seeded:?}");
+        h.step(&json!({"key": "Enter"})).unwrap();
+        assert!(h.app.dialog.is_none(), "{:?}", h.app.dialog.as_ref().map(|d| &d.error));
+        let (again, position) = last_hole(&h);
+        assert_eq!(again, hole, "the same feature");
+        assert!(position.dist(p) < 1e-9, "{deg}°: OK keeps the hole on the Rod, not at {position:?}");
+        let m = h.app.run("inspect.measure", json!({})).unwrap();
+        let block = m["bodies"].as_array().and_then(|bs| bs.iter().find(|b| b["name"] == "Block")).and_then(|b| b["volume_mm3"].as_f64());
+        assert!(block.is_some_and(|v| (v - 16_000.0).abs() < 1e-6), "{deg}°: the Block is not drilled: {block:?}");
+    }
 }
 
 /// Single holes on two faces with the depth typed as `ScrewDepth = 5`: OK runs one command per
@@ -621,4 +674,55 @@ fn edit_holes_on_a_folder_changes_what_was_edited_in_every_hole_and_keeps_the_re
     let mixed = h.app.session.doc.timeline_groups.iter().find(|g| g.name == "Mixed").unwrap().id;
     assert!(crate::hole_folder::holes(&h.app, mixed).is_none());
     assert!(h.step(&json!({"call": "ui.editFolder", "params": {"folder": "Mixed"}})).is_err());
+}
+
+/// Single holes on the block's top and front faces, made with OK; the new Hole features' ids.
+fn holes_on_two_faces(h: &mut Harness) -> Vec<u64> {
+    let before = h.app.session.doc.features.len();
+    h.step(&json!({"start": "solid.hole"})).unwrap();
+    for p in [Vec3::new(30.0, 20.0, 20.0), Vec3::new(25.0, 0.0, 10.0)] {
+        let at = screen(h, p);
+        h.step(&json!({"click": at})).unwrap();
+    }
+    h.step(&json!({"click": {"handle": "dialog:ok"}})).unwrap();
+    h.settle();
+    assert!(h.app.dialog.is_none(), "{:?}", h.app.dialog.as_ref().map(|d| &d.error));
+    h.app.session.doc.features[before..].iter().filter(|f| matches!(f.kind, FeatureKind::Hole { .. })).map(|f| f.id).collect()
+}
+
+#[test]
+fn holes_made_together_share_a_closed_folder_when_preferences_say_so() {
+    let mut h = block_as_installed();
+    h.step(&json!({"call": "ui.view", "params": {"view": "iso"}})).unwrap();
+    h.settle();
+    // Off (the default): each hole is its own entry in History, as before.
+    assert_eq!(holes_on_two_faces(&mut h).len(), 2);
+    assert!(h.app.session.doc.timeline_groups.is_empty(), "no folder");
+    // On: the two holes go into one folder, closed at first.
+    crate::prefs::set(&mut h.app, &json!({"hole_group": true})).unwrap();
+    let made = holes_on_two_faces(&mut h);
+    assert_eq!(made.len(), 2);
+    let [folder] = h.app.session.doc.timeline_groups.as_slice() else { panic!("one folder: {:?}", h.app.session.doc.timeline_groups) };
+    assert_eq!((folder.name.as_str(), &folder.features, folder.parent), ("Holes", &made, None));
+    assert!(!crate::timeline_folders::is_open(&h.app, folder.id, true), "closed at first, in both Histories");
+    h.app.run("edit.undo", json!({})).unwrap();
+    assert!(h.app.session.doc.timeline_groups.is_empty(), "first Undo removes the folder");
+    assert_eq!(h.app.session.doc.features.iter().filter(|f| made.contains(&f.id)).count(), 2, "holes remain");
+    h.app.run("edit.undo", json!({})).unwrap();
+    assert_eq!(h.app.session.doc.features.iter().filter(|f| made.contains(&f.id)).count(), 0, "second Undo removes both holes");
+    h.app.run("edit.redo", json!({})).unwrap();
+    h.app.run("edit.redo", json!({})).unwrap();
+    // One hole alone, or a hole edited, stays out of any new folder.
+    h.step(&json!({"start": "solid.hole"})).unwrap();
+    let at = screen(&mut h, Vec3::new(5.0, 25.0, 20.0));
+    h.step(&json!({"click": at})).unwrap();
+    h.step(&json!({"click": {"handle": "dialog:ok"}})).unwrap();
+    h.settle();
+    assert!(h.app.dialog.is_none(), "{:?}", h.app.dialog.as_ref().map(|d| &d.error));
+    h.step(&json!({"call": "ui.editFeature", "params": {"feature": made[0]}})).unwrap();
+    h.frames(4);
+    h.step(&json!({"click": {"handle": "dialog:ok"}})).unwrap();
+    h.settle();
+    assert_eq!(h.app.session.doc.timeline_groups.len(), 1, "still the one folder");
+    assert_eq!(h.app.session.doc.timeline_groups[0].features, made, "holding the same holes");
 }

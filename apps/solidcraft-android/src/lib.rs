@@ -20,10 +20,16 @@ mod mcp_http;
 // Plain functions, built (and tested) on every system.
 #[cfg_attr(not(target_os = "android"), allow(dead_code))]
 mod insets;
+#[cfg(any(target_os = "android", test))]
+mod keyboard;
 #[cfg_attr(not(target_os = "android"), allow(dead_code))]
 mod names;
 #[cfg_attr(not(target_os = "android"), allow(dead_code))]
 mod startup;
+// Thread-local keys past Android's limit (build.rs wraps std's key calls into it).
+#[cfg(unix)]
+#[cfg_attr(not(target_os = "android"), allow(dead_code))]
+mod tls_keys;
 
 #[cfg(target_os = "android")]
 mod android {
@@ -62,6 +68,8 @@ mod android {
         caption: Option<f32>,
         /// Settings › MCP server.
         mcp: McpHost,
+        /// The on-screen keyboard comes up for a tapped field, not for a window opening.
+        keyboard: crate::keyboard::KeyboardGate,
         /// The app's folder, the graphics this launch started on, and whether that was a fallback:
         /// told once a frame is on screen (`startup::drew`).
         started: Option<(std::path::PathBuf, Backend, bool)>,
@@ -70,7 +78,7 @@ mod android {
     /// Whether Escape has something to close: Preferences, a dialog, a tool, a sketch being
     /// edited, a menu or popup, or a field with the keyboard.
     fn escape_closes(app: &SolveApp, ctx: &egui::Context) -> bool {
-        app.prefs_window.open
+        app.prefs_window.shell.open
             || app.dialog.is_some()
             || app.tool.is_some()
             || app.session.active_sketch.is_some()
@@ -138,6 +146,7 @@ mod android {
             } else {
                 self.app.ui(&mut ui.new_child(egui::UiBuilder::new().max_rect(content)));
             }
+            self.keyboard.frame(ui.ctx());
             // egui's Copy has no clipboard on Android: hand what it copied to the system's.
             if let Some(d) = &self.documents {
                 let copied: Vec<String> = ui.ctx().output(|o| {
@@ -215,7 +224,11 @@ mod android {
         let (backend, fallback) = data.as_deref().map_or((Backend::Default, false), crate::startup::begin);
         // A launch that died in the driver compiling the GPU evaluation: bodies on the CPU.
         if let Some(dir) = data.as_deref() {
-            solidcraft_gpu::tess_guard::remember_in(dir);
+            solidcraft_viewport_gpu::tess_guard::remember_in(dir);
+        }
+        // Plugins install into the app's own folder: Android has no per-user data folder for upstream's.
+        if let Some(dir) = data.as_ref() {
+            let _ = solidcraft_engine::plugin::configure_process_plugins_dir(dir.join("plugins"));
         }
         // Where a launch that can't start says why: a computer reaches it over USB.
         let error_file = app.external_data_path().or_else(|| data.clone()).map(|d| d.join(crate::startup::ERROR_FILE));
@@ -300,7 +313,7 @@ mod android {
                 if fallback {
                     app.set_status("The last launch could not start its graphics, so this one uses OpenGL ES.", false);
                 }
-                Ok(Box::new(Shell { app, frames: 0, documents, escape: false, caption: None, mcp, started }))
+                Ok(Box::new(Shell { app, frames: 0, documents, escape: false, caption: None, mcp, keyboard: Default::default(), started }))
             }),
         );
         if let Err(e) = result {
